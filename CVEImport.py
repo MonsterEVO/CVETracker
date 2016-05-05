@@ -8,13 +8,13 @@ import psycopg2 as dbapi2
 
 #varibles
 path = "https://nvd.nist.gov/feeds/xml/cve/nvdcve-2.0-2016.xml.gz"
-gzfile = "test.xml.gz"
-xmlfile = "test.xml"
+gzfile = "cvelsit.xml.gz"
+xmlfile = "cvelist.xml"
 
 
 #Grab file to be used for nist website
-testfile = urllib.URLopener()
-testfile.retrieve(path, gzfile)
+cvefile = urllib.URLopener()
+cvefile.retrieve(path, gzfile)
 
 #uncompress file
 inF = gzip.GzipFile(gzfile, 'rb')
@@ -36,8 +36,7 @@ conn = dbapi2.connect (database="CVE", host="localhost", user="postgres", passwo
 cur = conn.cursor()
 
 #parse data
-xmldoc = minidom.parse("test.xml")
-mapping = {}                                                                                                            #Sets mapping variable for dictionary dataset
+xmldoc = minidom.parse("cvelist.xml")
 for nodeEntry in xmldoc.getElementsByTagName("entry"):                                                                  #for loop to get entry ID and and vulnerable SW
     entryid = nodeEntry.getAttribute("id")
     software = nodeEntry.getElementsByTagName("vuln:product")
@@ -89,8 +88,7 @@ cur.execute("DROP TABLE cv2;")
 conn.commit()
 
 #parse data
-xmldoc = minidom.parse("test.xml")
-mapping = {}                                                                                                            #Sets mapping variable for dictionary dataset
+xmldoc = minidom.parse("cvelist.xml")
 for nodeEntry in xmldoc.getElementsByTagName("entry"):                                                                  #for loop to get entry ID and and vulnerable SW
     entryid = nodeEntry.getAttribute("id")
     software = nodeEntry.getElementsByTagName("vuln:product")
@@ -112,6 +110,46 @@ conn.commit()
 
 #Delete Reference Table
 cur.execute("DROP TABLE sl2;")
+conn.commit()
+
+##################
+##Mapping Import##
+##################
+
+#varibles
+mappath = "http://iasecontent.disa.mil/stigs/xml/cvexref_u.xml"
+mapxmlfile = "mapping.xml"
+
+
+#Grab file to be used for nist website
+mapfile = urllib.URLopener()
+mapfile.retrieve(mappath, mapxmlfile)
+
+#parse data
+xmldoc = minidom.parse("mapping.xml")
+for nodeEntry in xmldoc.getElementsByTagName("notice"):                                                                  #for loop to get required info
+    iavmnum = nodeEntry.getAttribute("number")
+    iavmseverity = nodeEntry.getAttribute("severity")
+    iavmtitle = nodeEntry.getAttribute("title")
+    cveid = nodeEntry.getElementsByTagName("cve")
+    for nodeCVEid in cveid:                                                                                             #for loop to get each CVE that matches an IAVM
+        cvelist = nodeCVEid.childNodes[0].data
+        SQLinsert = "INSERT INTO cve_iavm (cve_item, iavm_item, severity, title) VALUES (%s, %s, %s, %s)"               #Defines SQL insert function to be used
+        cur.execute(SQLinsert, (cvelist, iavmnum, iavmseverity, iavmtitle))                                             #Executes SQL statement in postgres
+        conn.commit()                                                                                                   #Saves change to database
+
+#Create Reference Table
+cur.execute("CREATE TABLE mp2 AS SELECT * FROM cve_iavm;")
+conn.commit()
+
+#Delete Duplicates by checking package name and keeping first occurence of package
+cur.execute("DELETE FROM cve_iavm USING cve_iavm mp2 WHERE cve_iavm.cve_item = mp2.cve_item \
+AND cve_iavm.iavm_item = mp2.iavm_item AND cve_iavm.severity = mp2.severity AND \
+cve_iavm.title = mp2.title AND cve_iavm.key_column > mp2.key_column;")
+conn.commit()
+
+#Delete Reference Table
+cur.execute("DROP TABLE mp2;")
 conn.commit()
 
 #Close connection
